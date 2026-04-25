@@ -1,5 +1,7 @@
 # nvdcli
 
+![test workflow](https://github.com/tatut/nvdcli/actions/workflows/test.yml/badge.svg)
+
 nvdcli is a tool to download and query a local cache of NVD vulnerability data.
 It is blazing fast (because it's just sqlite under the hood).
 
