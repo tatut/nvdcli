@@ -19,7 +19,7 @@ typedef enum cmd {
   SHOW,   // show human readable info about CVE id
   GET,    // synonym for show, but sets output to raw json
   SEARCH, // simple fts search
-
+  QUERY,  // allow queries like with multiple values `severity:HIGH match:jackson*`
   BUILD,  // build the db from scratch
   UPDATE  // find any changes after the latest one, update those
 } cmd;
@@ -37,7 +37,7 @@ typedef struct args {
   cmd command;
   output fmt;
   bool fmt_set; // is fmt set explicitly
-  char *args[16]; // command args (first NULL means no more args)
+  char *args[32]; // command args (first NULL means no more args)
 } args;
 
 
@@ -121,6 +121,8 @@ bool read_args(int argc, char **argv, args *a) {
           a->command = UPDATE;
         } else if (strcmp(argv[0], "get") == 0) {
           a->command = GET;
+        } else if (strcmp(argv[0], "query") == 0 || strcmp(argv[0], "q") == 0) {
+          a->command = QUERY;
         } else {
           fprintf(stderr, "Unrecognized command: %s\n", argv[0]);
           return false;
@@ -510,7 +512,7 @@ bool display_verbose(int level, int expected_parent, sqlite3_stmt *stmt,
     if(unhandled) goto start;
   } else {
     char *type_color = "\e[0;37m";
-    char *value = sqlite3_column_text(stmt, 1);
+    char *value = (char*) sqlite3_column_text(stmt, 1);
     if (strcmp(type, "text") == 0) {
       type_color = "\e[0;34m";
     } else if (strcmp(type, "real") == 0) {
@@ -542,7 +544,6 @@ bool display(args *a, sqlite3 *db, char *id, char *cve_id, char *cve_description
 
   bool success = true;
   if (stmt == NULL) {
-    printf("preparing: %s\n", display_query[a->fmt]);
     ret =
         sqlite3_prepare(db, display_query[a->fmt], -1, &stmt, NULL);
     SQ_CHECK(ret);
@@ -598,13 +599,89 @@ done:
   return success;
 }
 
+#define MAX_SQL 2048
+bool query(args *a, sqlite3 *db) {
+  char sql[MAX_SQL];
+  char *query_args[32];
+  bool query_arg_number[32] = {0};
+  size_t len = 0;
+  int res;
+  bool success = true;
+  sqlite3_stmt *stmt = NULL;
+  len += snprintf(&sql[len], MAX_SQL - len, "SELECT id FROM cve WHERE ");
+  int i = 0;
+  while (a->args[i] != NULL) {
+    char *arg = a->args[i];
+    if (strncmp(arg, "sev:", 4) == 0) {
+      len +=
+          snprintf(&sql[len], MAX_SQL - len,
+                   " %s data->>'$.metrics.cvssMetricV2[0].baseSeverity' = ?%d",
+                   i ? " AND " : "", (i + 1));
+      query_args[i] = arg + 4;
+    } else if (strncmp(arg, "score:", 6) == 0) {
+      arg += 6;
+      char *op;
+      if (*arg == '<') {
+        op = " < ";
+        arg++;
+      } else if (*arg == '>') {
+        op = " > ";
+        arg++;
+      } else {
+        op = " = ";
+      }
+      len +=
+        snprintf(&sql[len], MAX_SQL - len,
+                 " %s data->>'$.metrics.cvssMetricV2[0].impactScore' %s ?%d",
+                 i ? " AND " : "", op, (i + 1));
+      query_args[i] = arg;
+      query_arg_number[i] = true;
+    } else if (strncmp(arg, "match:", 6) == 0) {
+      arg += 6;
+      len += snprintf(&sql[len], MAX_SQL - len,
+                      " %s (id IN (SELECT cve FROM cve_search WHERE (cve MATCH ?%d) OR (description MATCH ?%d)))",
+                      i ? " AND " : "", i+1, i+1);
+      query_args[i] = arg;
+    }
 
+    i++;
+  }
+
+  printf("SQL: %s\n", sql);
+  res = sqlite3_prepare(db, sql, -1, &stmt, NULL);
+  SQ_CHECK(res);
+  int argc = i;
+  for (i = 0; i < argc; i++) {
+    if (query_arg_number[i]) {
+      double d = atof(query_args[i]);
+      res = sqlite3_bind_double(stmt, i+1, d);
+    } else {
+      res = sqlite3_bind_text(stmt, i + 1, query_args[i], -1, NULL);
+    }
+    SQ_CHECK(res);
+  }
+  res = sqlite3_step(stmt);
+  while (res == SQLITE_ROW) {
+    char *id = (char *)sqlite3_column_text(stmt, 0);
+    display(a, db, id, NULL, NULL);
+    res = sqlite3_step(stmt);
+  }
+  if (res != SQLITE_DONE) {
+    fprintf(stderr, "Unexpected SQLite status: %s\n", sqlite3_errstr(res));
+    success = false;
+  }
+
+done:
+  if(stmt) sqlite3_finalize(stmt);
+  return success;
+
+}
 bool search(args *a, sqlite3 *db) {
   bool success = true;
   int res, i = 0;
   sqlite3_stmt *stmt = NULL;
   res = sqlite3_prepare(db,
-                        "SELECT highlight(cve_search, 0, '<<HL', 'HL>>'),"
+                        "SELECT cve, highlight(cve_search, 0, '<<HL', 'HL>>'),"
                         "       highlight(cve_search, 1, '<<HL','HL>>') "
                         "  FROM cve_search"
                         " WHERE (cve MATCH ?1)"
@@ -616,9 +693,10 @@ bool search(args *a, sqlite3 *db) {
     SQ_CHECK(res);
     res = sqlite3_step(stmt);
     while (res == SQLITE_ROW) {
-      char *id = (char *)sqlite3_column_text(stmt, 0);
-      char *desc = (char *)sqlite3_column_text(stmt, 1);
-      display(a, db, a->args[i], id, desc);
+      char *raw_id = (char *)sqlite3_column_text(stmt, 0);
+      char *id = (char *)sqlite3_column_text(stmt, 1);
+      char *desc = (char *)sqlite3_column_text(stmt, 2);
+      display(a, db, raw_id, id, desc);
       res = sqlite3_step(stmt);
     }
     if (res != SQLITE_DONE) {
@@ -676,6 +754,10 @@ int main(int argc, char **argv) {
     break;
   case SEARCH:
     if (!search(&args, db))
+      ret = 1;
+    break;
+  case QUERY:
+    if (!query(&args, db))
       ret = 1;
     break;
   default:
