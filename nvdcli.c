@@ -647,7 +647,7 @@ bool query(args *a, sqlite3 *db) {
     i++;
   }
 
-  printf("SQL: %s\n", sql);
+  //printf("SQL: %s\n", sql);
   res = sqlite3_prepare(db, sql, -1, &stmt, NULL);
   SQ_CHECK(res);
   int argc = i;

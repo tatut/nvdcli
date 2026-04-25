@@ -1,0 +1,18 @@
+name: test
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: release-downloader
+        uses: robinraju/release-downloader@v1.13
+        with:
+          repository: tatut/nvdcli
+          tag: 'nvd-cache-2026-04-24'
+          fileName: 'nvd-2026-04-24.data.bz2'
+      - run: bunzip2 nvd-2026-04-24.data.bz2
+      - run: mv nvd-2026-04-24.data nvd.data
+      - run: make
+      - run: sh test/test.sh > test/test.out
+      - run: diff test/test.out test/test.expected
