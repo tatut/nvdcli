@@ -7,6 +7,7 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt install libcurl4-openssl-dev
       - uses: actions/checkout@v6
+      - run: make
       - name: release-downloader
         uses: robinraju/release-downloader@v1.13
         with:
@@ -15,6 +16,5 @@ jobs:
           fileName: 'nvd-2026-04-24.data.bz2'
       - run: bunzip2 nvd-2026-04-24.data.bz2
       - run: mv nvd-2026-04-24.data nvd.data
-      - run: make
       - run: sh test/test.sh > test/test.out
       - run: diff test/test.out test/test.expected

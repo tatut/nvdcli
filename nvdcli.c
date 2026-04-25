@@ -670,7 +670,13 @@ bool query(args *a, sqlite3 *db) {
   }
   if (a->fmt != JSON && a->fmt != ID) {
     // if we are generating human readable output, show result count
-    printf("%d results.\n", results);
+    if (!results) {
+      printf("No results found.\n");
+    } else if (results == 1) {
+      printf("1 result found.\n");
+    } else {
+      printf("%d results found.\n", results);
+    }
   }
   if (res != SQLITE_DONE) {
     fprintf(stderr, "Unexpected SQLite status: %s\n", sqlite3_errstr(res));
@@ -680,19 +686,21 @@ bool query(args *a, sqlite3 *db) {
 done:
   if(stmt) sqlite3_finalize(stmt);
   return success;
-
 }
+
+const char *search_query =
+    "SELECT cve, highlight(cve_search, 0, '<<HL', 'HL>>'),"
+    "       highlight(cve_search, 1, '<<HL','HL>>')"
+    "  FROM cve_search"
+    " WHERE (cve MATCH ?1)"
+    "    OR (description MATCH ?1)"
+    " ORDER BY rank";
+
 bool search(args *a, sqlite3 *db) {
   bool success = true;
   int res, i = 0;
   sqlite3_stmt *stmt = NULL;
-  res = sqlite3_prepare(db,
-                        "SELECT cve, highlight(cve_search, 0, '<<HL', 'HL>>'),"
-                        "       highlight(cve_search, 1, '<<HL','HL>>') "
-                        "  FROM cve_search"
-                        " WHERE (cve MATCH ?1)"
-                        "    OR (description MATCH ?1)"
-                        " ORDER BY rank", -1, &stmt, NULL);
+  res = sqlite3_prepare(db, search_query, -1, &stmt, NULL);
   SQ_CHECK(res);
   while (a->args[i] != NULL) {
     res = sqlite3_bind_text(stmt, 1, a->args[i], -1, NULL);
@@ -720,6 +728,24 @@ done:
   return success;
 }
 
+const char *usage =
+    "Usage: nvdcli [options] command [...command args...]\n"
+    "Options:\n"
+    " --db-file <file>          Path to database file (defaults to "
+    "nvd.data in cwd)\n"
+    " --nvd-api-key <api key>   NVD API key (defaults to NVD_API_KEY "
+    "env variable)\n"
+    "\n"
+    "Commands:\n"
+    " build                     Initialize database and fetch all NVDs\n"
+    " update                    Update NVDs that have changed since "
+    "last update (or build) date\n"
+    " show <CVE ID>             Show information on the given CVE\n"
+    " get <CVE ID>              get raw CVE JSON\n"
+    " search <keywords...>      Search CVE database for hits for the "
+    "given keywords\n"
+    " q <filters...>            Search by filters (see below)\n\n";
+
 int main(int argc, char **argv) {
   int ret = 0;
   args args = {0};
@@ -731,20 +757,7 @@ int main(int argc, char **argv) {
 
   switch(args.command) {
   case USAGE:
-    printf("Usage: nvdcli [options] command [...command args...]\n"
-           "Options:\n"
-           " --db-file <file>          Path to database file (defaults to "
-           "nvd.data in cwd)\n"
-           " --nvd-api-key <api key>   NVD API key (defaults to NVD_API_KEY "
-           "env variable)\n"
-           "\n"
-           "Commands:\n"
-           " build                     Initialize database and fetch all NVDs\n"
-           " update                    Update NVDs that have changed since "
-           "last update (or build) date\n"
-           " show <CVE ID>             Show information on the given CVE\n"
-           " search <keywords...>      Search CVE database for hits for the "
-           "given keywords\n\n");
+    printf("%s",usage);
     break;
   case BUILD:
     if (!build_db(&args, db))
