@@ -4,6 +4,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - run: apt-get update
+      - run: apt install libcurl4-openssl-dev
       - uses: actions/checkout@v6
       - name: release-downloader
         uses: robinraju/release-downloader@v1.13
