@@ -14,7 +14,7 @@ CVE-2020-28885
  published: 2022-01-28T12:15:07.960
  severity: HIGH
 Liferay Portal Server tested on 7.3.5 GA6, 7.2.0 GA1 is affected by OS Command Injection. An adminis[44m[...][0m
-4 results.
+4 results found.
           [0;36mbaseScore[0m: [0;35m7.2[0m
           [0;36mbaseScore[0m: [0;35m9.0[0m
 CVE-2025-49128
