@@ -661,10 +661,16 @@ bool query(args *a, sqlite3 *db) {
     SQ_CHECK(res);
   }
   res = sqlite3_step(stmt);
+  int results = 0;
   while (res == SQLITE_ROW) {
+    results++;
     char *id = (char *)sqlite3_column_text(stmt, 0);
     display(a, db, id, NULL, NULL);
     res = sqlite3_step(stmt);
+  }
+  if (a->fmt != JSON && a->fmt != ID) {
+    // if we are generating human readable output, show result count
+    printf("%d results.\n", results);
   }
   if (res != SQLITE_DONE) {
     fprintf(stderr, "Unexpected SQLite status: %s\n", sqlite3_errstr(res));
